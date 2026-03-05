@@ -1,7 +1,22 @@
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 8080;
+const PUBLIC_DIR = path.join(__dirname, "public");
+
+const MIME_TYPES = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".wasm": "application/wasm",
+  ".pck": "application/octet-stream",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".css": "text/css",
+  ".json": "application/json",
+};
 const LOBBY_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // Lobby storage: code -> { host, clients[], names[], settings, created_at }
@@ -122,8 +137,34 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  res.writeHead(404);
-  res.end("Not found");
+  // Static file serving from public/
+  let filePath = path.join(PUBLIC_DIR, req.url === "/" ? "index.html" : req.url);
+  filePath = path.normalize(filePath);
+
+  // Prevent directory traversal
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.stat(filePath, (err, stats) => {
+    if (err || !stats.isFile()) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    });
+    fs.createReadStream(filePath).pipe(res);
+  });
 });
 
 // WebSocket server
